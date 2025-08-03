@@ -432,7 +432,7 @@ pub mod pallet {
 				issuer_hash,
 				account_id: acquirer_address,
 				schema_hash,
-				attestation_id: attestation_id,
+				attestation_id,
 				attestation,
 			});
 
@@ -440,19 +440,22 @@ pub mod pallet {
 		}
 
 		#[pallet::call_index(3)]
-		#[pallet::weight({
-      let attestation = Attestations::<T>
-				::get(&attestation_id).ok_or(Error::<T>::AttestationNotFound).unwrap();
-			let schema = Schemas::<T>::get(attestation.schema_hash).unwrap_or_default();
-			let field_count = schema.len() as u32;
-			let max_value_size = raw_attestation
-				.iter()
-				.map(|v| v.len())
-				.max()
-				.unwrap_or(0) as u32;
-			let address_type = 1u32; // Default to most expensive case
-			T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
-		})]
+    #[pallet::weight({
+    match Attestations::<T>::get(&attestation_id) {
+      Some(attestation) => {
+              let schema = Schemas::<T>::get(attestation.schema_hash).unwrap_or_default();
+              let field_count = schema.len() as u32;
+              let max_value_size = raw_attestation
+                      .iter()
+                      .map(|v| v.len())
+                      .max()
+                      .unwrap_or(0) as u32;
+              let address_type = 1u32; // Default to most expensive case
+              T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+      },
+      None => T::CredentialsWeightInfo::attest(0, 0, 1),
+    }
+    })]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
 			attestation_id: AttestationId<T>,
@@ -526,22 +529,27 @@ pub mod pallet {
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
+      // Current block time used for checks and revocation
+			let now = BlockTime {
+        time: pallet_timestamp::Pallet::<T>::now(),
+        block_number: frame_system::Pallet::<T>::block_number(),
+			};
+
+			// Ensure the attestation hasn't already expired
+			ensure!(attestation.is_valid_at(&now), Error::<T>::AttestationAlreadyRevoked);
+
 			// Set expiration to current time (effectively revoking it)
-			attestation.metadata.expiration = Some(BlockTime {
-				time: pallet_timestamp::Pallet::<T>::now(),
-				block_number: frame_system::Pallet::<T>::block_number(),
-			});
+			attestation.metadata.expiration = Some(now);
 
 			// Save the updated attestation
 			Attestations::<T>::insert(&attestation_id, &attestation);
 
 			// Emit event (you might want to add a new event type for revocation)
-			Self::deposit_event(Event::AttestationUpdated {
+			Self::deposit_event(Event::AttestationRevoked {
 				issuer_hash: attestation.issuer_hash,
 				account_id: attestation.account_id,
 				schema_hash: attestation.schema_hash,
 				attestation_id,
-				attestation: attestation.data,
 			});
 
 			Ok(())
