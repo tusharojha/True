@@ -254,12 +254,12 @@ pub mod pallet {
 			attestation_id: AttestationId<T>,
 			attestation: CredAttestation<T>,
 		},
-    AttestationRevoked {
-      issuer_hash: IssuerHash<T>,
-      account_id: AcquirerAddress,
-      schema_hash: SchemaHash<T>,
-      attestation_id: AttestationId<T>,
-    },
+		AttestationRevoked {
+			issuer_hash: IssuerHash<T>,
+			account_id: AcquirerAddress,
+			schema_hash: SchemaHash<T>,
+			attestation_id: AttestationId<T>,
+		},
 	}
 
 	#[pallet::error]
@@ -273,9 +273,9 @@ pub mod pallet {
 		AttestationNotFound,
 		InvalidAttestationIndex,
 		InvalidHashFormat,
-    AttestationExpired,
-    AttestationAlreadyRevoked,
-    UnauthorizedUpdate,
+		AttestationExpired,
+		AttestationAlreadyRevoked,
+		UnauthorizedUpdate,
 	}
 
 	#[pallet::call]
@@ -440,22 +440,22 @@ pub mod pallet {
 		}
 
 		#[pallet::call_index(3)]
-    #[pallet::weight({
-    match Attestations::<T>::get(&attestation_id) {
-      Some(attestation) => {
-              let schema = Schemas::<T>::get(attestation.schema_hash).unwrap_or_default();
-              let field_count = schema.len() as u32;
-              let max_value_size = raw_attestation
-                      .iter()
-                      .map(|v| v.len())
-                      .max()
-                      .unwrap_or(0) as u32;
-              let address_type = 1u32; // Default to most expensive case
-              T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
-      },
-      None => T::CredentialsWeightInfo::attest(0, 0, 1),
-    }
-    })]
+		#[pallet::weight({
+			match Attestations::<T>::get(&attestation_id) {
+				Some(attestation) => {
+					let schema = Schemas::<T>::get(attestation.schema_hash).unwrap_or_default();
+					let field_count = schema.len() as u32;
+					let max_value_size = raw_attestation
+						.iter()
+						.map(|v| v.len())
+						.max()
+						.unwrap_or(0) as u32;
+					let address_type = 1u32; // Default to most expensive case
+					T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+				}
+				None => T::CredentialsWeightInfo::attest(0, 0, 1),
+			}
+		})]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
 			attestation_id: AttestationId<T>,
@@ -509,8 +509,37 @@ pub mod pallet {
 			Ok(())
 		}
 
-		// Optional: Add a function to revoke/invalidate an attestation
 		#[pallet::call_index(4)]
+		#[pallet::weight(1_000_000_000)]
+		pub fn update_attestation_by_details(
+			origin: OriginFor<T>,
+			for_account: Vec<u8>,
+			issuer_hash: IssuerHash<T>,
+			schema_hash: SchemaHash<T>,
+			attestation_index: u32,
+			raw_attestation: Vec<Vec<u8>>,
+			new_expiry: Option<BlockTime<T>>
+		) -> DispatchResult {
+			let who = ensure_signed(origin.clone())?;
+			let acquirer_address = Self::parse_acquirer_address(for_account)?;
+
+			let mut bytes = Vec::new();
+
+			bytes.extend_from_slice(&acquirer_address.encode());
+			bytes.extend_from_slice(&issuer_hash.encode());
+			bytes.extend_from_slice(&schema_hash.encode());
+			bytes.extend_from_slice(&attestation_index.encode());
+
+			let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+			// Get the existing attestation
+			Self::update_attestation(origin, attestation_id, raw_attestation, new_expiry)?;
+
+			Ok(())
+		}
+
+		// Optional: Add a function to revoke/invalidate an attestation
+		#[pallet::call_index(5)]
 		#[pallet::weight(T::CredentialsWeightInfo::create_schema(1, 32))] // Simple weight
 		pub fn revoke_attestation(
 			origin: OriginFor<T>,
@@ -529,10 +558,10 @@ pub mod pallet {
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
-      // Current block time used for checks and revocation
+			// Current block time used for checks and revocation
 			let now = BlockTime {
-        time: pallet_timestamp::Pallet::<T>::now(),
-        block_number: frame_system::Pallet::<T>::block_number(),
+				time: pallet_timestamp::Pallet::<T>::now(),
+				block_number: frame_system::Pallet::<T>::block_number(),
 			};
 
 			// Ensure the attestation hasn't already expired
@@ -695,48 +724,53 @@ pub mod pallet {
 			Err(Error::<T>::InvalidAddress.into())
 		}
 
-    pub fn get_attestation(attestation_id: &AttestationId<T>) -> Option<Attestation<T>> {
-        Attestations::<T>::get(attestation_id)
-    }
+		pub fn get_attestation(attestation_id: &AttestationId<T>) -> Option<Attestation<T>> {
+			Attestations::<T>::get(attestation_id)
+		}
 
-    pub fn is_attestation_valid(
-        attestation_id: &AttestationId<T>
-    ) -> Result<bool, DispatchError> {
-        let attestation = Self::get_attestation(attestation_id)
-            .ok_or(Error::<T>::AttestationNotFound)?;
-        
-        let current_time = BlockTime {
-            time: pallet_timestamp::Pallet::<T>::now(),
-            block_number: frame_system::Pallet::<T>::block_number(),
-        };
+		pub fn is_attestation_valid(
+			attestation_id: &AttestationId<T>
+		) -> Result<bool, DispatchError> {
+			let attestation = Self::get_attestation(attestation_id).ok_or(
+				Error::<T>::AttestationNotFound
+			)?;
 
-        Ok(attestation.is_valid_at(&current_time))
-    }
+			let current_time = BlockTime {
+				time: pallet_timestamp::Pallet::<T>::now(),
+				block_number: frame_system::Pallet::<T>::block_number(),
+			};
 
-    // Get all attestations for a specific user, issuer, and schema
-    pub fn get_user_attestations(
-        account: &AcquirerAddress,
-        issuer_hash: &IssuerHash<T>,
-        schema_hash: &SchemaHash<T>,
-    ) -> Vec<(AttestationId<T>, Attestation<T>)> {
-        let next_id = AttestationNextId::<T>::get((account.clone(), *issuer_hash, *schema_hash));
-        let mut attestations = Vec::new();
+			Ok(attestation.is_valid_at(&current_time))
+		}
 
-        for index in 0..next_id {
-            let mut bytes = Vec::new();
-            bytes.extend_from_slice(&account.encode());
-            bytes.extend_from_slice(&issuer_hash.encode());
-            bytes.extend_from_slice(&schema_hash.encode());
-            bytes.extend_from_slice(&index.encode());
+		// Get all attestations for a specific user, issuer, and schema
+		pub fn get_user_attestations(
+			account: &AcquirerAddress,
+			issuer_hash: &IssuerHash<T>,
+			schema_hash: &SchemaHash<T>
+		) -> Vec<(AttestationId<T>, Attestation<T>)> {
+			let next_id = AttestationNextId::<T>::get((
+				account.clone(),
+				*issuer_hash,
+				*schema_hash,
+			));
+			let mut attestations = Vec::new();
 
-            let attestation_id = <T as Config>::Hashing::hash(&bytes);
-            
-            if let Some(attestation) = Self::get_attestation(&attestation_id) {
-                attestations.push((attestation_id, attestation));
-            }
-        }
+			for index in 0..next_id {
+				let mut bytes = Vec::new();
+				bytes.extend_from_slice(&account.encode());
+				bytes.extend_from_slice(&issuer_hash.encode());
+				bytes.extend_from_slice(&schema_hash.encode());
+				bytes.extend_from_slice(&index.encode());
 
-        attestations
-    }
+				let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+				if let Some(attestation) = Self::get_attestation(&attestation_id) {
+					attestations.push((attestation_id, attestation));
+				}
+			}
+
+			attestations
+		}
 	}
 }

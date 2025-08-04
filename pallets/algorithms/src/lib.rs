@@ -5,11 +5,9 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use log;
-    use frame_support::{dispatch, dispatch::*, pallet_prelude::*};
+    use frame_support::{dispatch::*, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
-    use scale_info::prelude;
-    use sp_runtime::{FixedI64, FixedPointNumber, Rounding};
-    use wasmi::{self, core::F64, Value};
+    use wasmi::{self};
     use sp_runtime::Vec;
     use sp_runtime::traits::Hash;
     use wasmi::{Func, Caller};
@@ -139,7 +137,7 @@ pub mod pallet {
         #[pallet::call_index(1)]
         #[pallet::weight(100_000)]
         pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>, gas_limit: Option<u64>) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            let _who = ensure_signed(origin)?;
 
             ensure!(schema_hashes.len() <= T::MaxSchemas::get() as usize, Error::<T>::TooManySchemas);
 
@@ -171,7 +169,7 @@ pub mod pallet {
         #[pallet::call_index(2)]
         #[pallet::weight(100_000)]
         pub fn run_algo_for(origin: OriginFor<T>, issuer_hash: T::Hash, account_id: Vec<u8>, algorithm_id: u64) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            let _who = ensure_signed(origin)?;
 
             let acquirer_address = credentials::Pallet::<T>::parse_acquirer_address(account_id.clone())?;
 
