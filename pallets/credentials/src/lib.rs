@@ -106,6 +106,7 @@ pub mod pallet {
 	#[scale_info(skip_type_params(T))]
 	pub struct AttestationMetadata<T: Config> {
 		pub created_at: BlockTime<T>,
+    pub updated_at: BlockTime<T>, 
 		pub version: u32,
 		pub expiration: Option<BlockTime<T>>,
 
@@ -411,6 +412,10 @@ pub mod pallet {
 						time: pallet_timestamp::Pallet::<T>::now(),
 						block_number: frame_system::Pallet::<T>::block_number(),
 					},
+					updated_at: BlockTime {
+						time: pallet_timestamp::Pallet::<T>::now(),
+						block_number: frame_system::Pallet::<T>::block_number(),
+					},
 					version: 0,
 					expiration: expiry,
 					attestation_index,
@@ -488,6 +493,10 @@ pub mod pallet {
 			// Update the attestation
 			attestation.data = new_attestation_data.clone();
 			attestation.metadata.version += 1;
+      attestation.metadata.updated_at = BlockTime {
+        time: pallet_timestamp::Pallet::<T>::now(),
+        block_number: frame_system::Pallet::<T>::block_number(),
+      };
 
 			// Update expiry if provided
 			if let Some(expiry) = new_expiry {
@@ -568,6 +577,7 @@ pub mod pallet {
 			ensure!(attestation.is_valid_at(&now), Error::<T>::AttestationAlreadyRevoked);
 
 			// Set expiration to current time (effectively revoking it)
+      attestation.metadata.updated_at = now.clone();
 			attestation.metadata.expiration = Some(now);
 
 			// Save the updated attestation
